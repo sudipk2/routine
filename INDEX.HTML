@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Daily Learning Tracker</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <div class="container">
+    <h1>📘 9-Month Developer Roadmap Tracker</h1>
+    <p class="date" id="todayDate"></p>
+
+    <div class="month">
+      <h2>Month 1 – Web Foundations</h2>
+
+      <label>
+        <input type="checkbox" data-task="html">
+        Practice HTML
+      </label>
+
+      <label>
+        <input type="checkbox" data-task="css">
+        Practice CSS
+      </label>
+
+      <label>
+        <input type="checkbox" data-task="js">
+        Practice JavaScript
+      </label>
+
+      <label>
+        <input type="checkbox" data-task="project">
+        Build a small project
+      </label>
+    </div>
+
+    <div class="month">
+      <h2>Daily Must-Do</h2>
+
+      <label>
+        <input type="checkbox" data-task="code">
+        Code for 3 hours
+      </label>
+
+      <label>
+        <input type="checkbox" data-task="revise">
+        Revise yesterday’s work
+      </label>
+
+      <label>
+        <input type="checkbox" data-task="notes">
+        Write notes
+      </label>
+    </div>
+
+    <button id="resetDay">Reset Today</button>
+  </div>
+
+  <script src="script.js"></script>
+  <a href="history.html" class="history-link">📊 View Daily History</a>
+
+</body>
+</html>
