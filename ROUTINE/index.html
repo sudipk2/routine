@@ -9,10 +9,22 @@
 
   <div class="container">
     <h1>📘 9-Month Developer Roadmap Tracker</h1>
+    <!-- Topic Progress Control -->
+  <div class="topic-control">
+    <h3 id="currentTopicText"></h3>
+    <button id="completeTopicBtn">✅ Complete Topic & Move Next</button>
+    <button id="prevTopicBtn">⬅ Go Back to Previous Topic</button>
+
+</div>
+
+    <a href="history.html" class="history-link">📊 View Daily History</a>
     <p class="date" id="todayDate"></p>
 
     <div class="month">
       <h2>Month 1 – Web Foundations</h2>
+      <!-- Dynamic Month Content -->
+    <div id="monthContent" class="month"></div>
+
 
       <label>
         <input type="checkbox" data-task="html">
@@ -58,7 +70,7 @@
   </div>
 
   <script src="script.js"></script>
-  <a href="history.html" class="history-link">📊 View Daily History</a>
+  
 
 </body>
 </html>

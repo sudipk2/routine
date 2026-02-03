@@ -62,3 +62,11 @@ button {
 button:hover {
   background: #dc2626;
 }
+
+.history-link {
+  display: block;
+  text-align: center;
+  margin-bottom: 15px;
+  color: #38bdf8;
+  text-decoration: none;
+}
