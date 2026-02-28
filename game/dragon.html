@@ -1,0 +1,818 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Skeletal Dragon</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#020205; overflow:hidden; cursor:none; width:100vw; height:100vh; }
+canvas { display:block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W = canvas.width = window.innerWidth;
+let H = canvas.height = window.innerHeight;
+window.addEventListener('resize', () => { W = canvas.width = innerWidth; H = canvas.height = innerHeight; });
+
+const mouse = { x: W/2, y: H/2 };
+document.addEventListener('mousemove', e => { mouse.x = e.clientX; mouse.y = e.clientY; });
+
+// ── SPINE CONFIG ─────────────────────────────────────────────────────
+const NUM_SEG = 28;
+const SEG_DIST = 18;
+const spine = Array.from({length: NUM_SEG}, (_, i) => ({ x: W/2, y: H/2 + i*SEG_DIST }));
+
+// ── MOTION STATE ─────────────────────────────────────────────────────
+let prevX = W/2, prevY = H/2;
+let velX = 0, velY = 0, speed = 0;
+let heading = -Math.PI/2;
+let prevHeading = heading;
+let smoothTurnRate = 0;
+let bankAngle = 0;
+let flapPhase = 0;
+let time = 0;
+
+// ── FLAME STATE ───────────────────────────────────────────────────────
+let flameActive = false, flameDuration = 0, lastFlameTime = -10000;
+const FLAME_CD = 3500, FLAME_DUR = 1800;
+const flames = [];
+document.addEventListener('mousedown', () => {
+  if (!flameActive && Date.now() - lastFlameTime > FLAME_CD) {
+    flameActive = true; flameDuration = FLAME_DUR; lastFlameTime = Date.now();
+  }
+});
+
+// ── AMBIENT PARTICLES ─────────────────────────────────────────────────
+const dust = Array.from({length: 100}, () => ({
+  x: Math.random()*W, y: Math.random()*H,
+  r: Math.random()*1.4+0.2,
+  vy: -(Math.random()*0.3+0.05),
+  o: Math.random()*0.22+0.04
+}));
+
+// ─────────────────────────────────────────────────────────────────────
+//  DRAWING PRIMITIVES
+// ─────────────────────────────────────────────────────────────────────
+function drawBone(x1, y1, x2, y2, w, alpha=1) {
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.strokeStyle = '#d4e6ff';
+  ctx.lineWidth = w;
+  ctx.lineCap = 'round';
+  ctx.shadowColor = 'rgba(180,215,255,0.55)';
+  ctx.shadowBlur = w * 2.8;
+  ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+  ctx.restore();
+}
+
+function drawJoint(x, y, r, alpha=1) {
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.shadowColor = 'rgba(170,210,255,0.75)';
+  ctx.shadowBlur = r * 3;
+  ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2);
+  ctx.fillStyle = 'rgba(140,190,255,0.14)';
+  ctx.strokeStyle = '#b8d4ff';
+  ctx.lineWidth = 1.4;
+  ctx.fill(); ctx.stroke();
+  // Specular highlight
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = 'rgba(235,248,255,0.5)';
+  ctx.beginPath(); ctx.arc(x-r*0.28, y-r*0.28, r*0.32, 0, Math.PI*2); ctx.fill();
+  ctx.restore();
+}
+
+// ─────────────────────────────────────────────────────────────────────
+//  SKULL — proper elongated draconic anatomy
+// ─────────────────────────────────────────────────────────────────────
+function drawSkull(x, y, angle) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(angle + Math.PI/2);  // +PI/2 → snout points in direction of travel
+  ctx.strokeStyle = '#cce0ff';
+  ctx.lineWidth = 1.9;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.shadowColor = 'rgba(210,235,255,0.85)';
+  ctx.shadowBlur = 11;
+
+  // ── Braincase / cranium (elongated, low profile) ──
+  ctx.beginPath();
+  ctx.moveTo(-13, 22);   // mandible notch L
+  ctx.lineTo(-18, 5);    // temporal L
+  ctx.lineTo(-20, -14);  // parietal L
+  ctx.lineTo(-11, -28);  // frontal L
+  ctx.lineTo(0, -32);    // prefrontal
+  ctx.lineTo(11, -28);   // frontal R
+  ctx.lineTo(20, -14);   // parietal R
+  ctx.lineTo(18, 5);     // temporal R
+  ctx.lineTo(13, 22);    // mandible notch R
+  ctx.fillStyle = 'rgba(140,185,255,0.045)';
+  ctx.fill(); ctx.stroke();
+
+  // ── Long draconic snout ──
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(-8, -24);
+  ctx.bezierCurveTo(-13, -44, -12, -72, -7, -90);
+  ctx.lineTo(-4, -98);  // snout tip top
+  ctx.bezierCurveTo(-1, -100, 1, -100, 4, -98);
+  ctx.bezierCurveTo(12, -72, 13, -44, 8, -24);
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(130,180,255,0.04)';
+  ctx.fill(); ctx.stroke();
+
+  // Premaxilla / nasal bridge ridge
+  ctx.lineWidth = 1.4;
+  ctx.beginPath(); ctx.moveTo(-3,-32); ctx.lineTo(-3,-98); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(3,-32); ctx.lineTo(3,-98); ctx.stroke();
+
+  // Nares (nostril openings)
+  ctx.lineWidth = 1.3;
+  ctx.beginPath(); ctx.ellipse(-3.5,-90,2.2,3.2,-0.18,0,Math.PI*2); ctx.stroke();
+  ctx.beginPath(); ctx.ellipse(3.5,-90,2.2,3.2,0.18,0,Math.PI*2); ctx.stroke();
+
+  // ── Orbital ridges + eye sockets ──
+  ctx.lineWidth = 2;
+  [-1,1].forEach(s => {
+    const ex = s*11, ey = -4;
+    // Supraorbital ridge
+    ctx.strokeStyle = '#cce0ff';
+    ctx.beginPath();
+    ctx.moveTo(ex-9, ey-4);
+    ctx.bezierCurveTo(ex-9, ey-12, ex+9, ey-12, ex+9, ey-4);
+    ctx.stroke();
+    // Socket outline (rhomboid)
+    ctx.beginPath();
+    ctx.moveTo(ex-8, ey); ctx.lineTo(ex, ey-10); ctx.lineTo(ex+8, ey);
+    ctx.lineTo(ex, ey+7); ctx.closePath();
+    ctx.fillStyle = '#020205';
+    ctx.fill(); ctx.stroke();
+    // Fire iris
+    ctx.shadowColor = '#ff5500';
+    ctx.shadowBlur = 30;
+    ctx.fillStyle = 'rgba(255,75,0,0.97)';
+    ctx.beginPath(); ctx.arc(ex, ey-1.5, 4.8, 0, Math.PI*2); ctx.fill();
+    ctx.shadowBlur = 0;
+    // Slit pupil
+    ctx.fillStyle = '#020205';
+    ctx.beginPath(); ctx.ellipse(ex, ey-1.5, 1.1, 4.2, 0, 0, Math.PI*2); ctx.fill();
+    ctx.shadowColor = 'rgba(210,235,255,0.85)';
+    ctx.shadowBlur = 11;
+  });
+  ctx.strokeStyle = '#cce0ff';
+
+  // ── Zygomatic arch (cheekbones) ──
+  ctx.lineWidth = 1.6;
+  [-1,1].forEach(s => {
+    ctx.beginPath();
+    ctx.moveTo(s*17, -8);
+    ctx.bezierCurveTo(s*26, -2, s*27, 12, s*18, 20);
+    ctx.stroke();
+  });
+
+  // ── Lower jaw / mandible ──
+  ctx.lineWidth = 1.8;
+  ctx.beginPath();
+  ctx.moveTo(-13, 22); ctx.lineTo(-15, 36);
+  ctx.bezierCurveTo(-15, 50, -7, 54, 0, 54);
+  ctx.bezierCurveTo(7, 54, 15, 50, 15, 36);
+  ctx.lineTo(13, 22);
+  ctx.fillStyle = 'rgba(120,175,255,0.04)';
+  ctx.fill(); ctx.stroke();
+
+  // Mandible joint balls
+  drawJoint(-13, 22, 3.8, 0.8);
+  drawJoint(13, 22, 3.8, 0.8);
+
+  // ── Teeth ── (upper + lower row)
+  ctx.lineWidth = 1.3; ctx.strokeStyle = '#deeeff';
+  // Upper: along snout  
+  [[-7,-60,4.5],[-5,-70,4],[-3,-80,3.5],[0,-86,3.2],[3,-80,3.5],[5,-70,4],[7,-60,4.5]].forEach(([tx,ty,ts]) => {
+    ctx.beginPath();
+    ctx.moveTo(tx-ts*0.42, ty+ts); ctx.lineTo(tx, ty-ts*1.9); ctx.lineTo(tx+ts*0.42, ty+ts);
+    ctx.fillStyle = 'rgba(220,238,255,0.25)'; ctx.fill(); ctx.stroke();
+  });
+  // Lower fangs
+  [[-9,36,4.5],[-4,46,4],[ 0,51,4],[ 4,46,4],[9,36,4.5]].forEach(([tx,ty,ts]) => {
+    ctx.beginPath();
+    ctx.moveTo(tx-ts*0.42, ty-ts); ctx.lineTo(tx, ty+ts*2); ctx.lineTo(tx+ts*0.42, ty-ts);
+    ctx.fillStyle = 'rgba(220,238,255,0.25)'; ctx.fill(); ctx.stroke();
+  });
+
+  ctx.strokeStyle = '#cce0ff'; ctx.lineWidth = 2;
+  ctx.shadowColor = 'rgba(210,235,255,0.85)';
+  ctx.shadowBlur = 11;
+
+  // ── Swept-back horns (paired, basilisk style) ──
+  ctx.lineWidth = 2.5;
+  [-1,1].forEach(s => {
+    // Primary horn — sweeps back
+    ctx.beginPath();
+    ctx.moveTo(s*13, -20);
+    ctx.bezierCurveTo(s*26, -26, s*38, -16, s*44, 6);
+    ctx.bezierCurveTo(s*48, 20, s*46, 36, s*42, 52);
+    ctx.stroke();
+    // Secondary orbital spike (short brow spike)
+    ctx.lineWidth = 1.8;
+    ctx.beginPath();
+    ctx.moveTo(s*14, -15); ctx.lineTo(s*24, -28); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(s*12, -22); ctx.lineTo(s*19, -38); ctx.stroke();
+    ctx.lineWidth = 2.5;
+  });
+
+  // ── Neck frill / crest spines ──
+  ctx.lineWidth = 1.5;
+  [-1,1].forEach(s => {
+    // Main frill spine
+    ctx.beginPath();
+    ctx.moveTo(s*15, 16);
+    ctx.bezierCurveTo(s*30, 22, s*42, 35, s*46, 56);
+    ctx.stroke();
+    // Secondary frill spine
+    ctx.beginPath();
+    ctx.moveTo(s*14, 20);
+    ctx.bezierCurveTo(s*26, 30, s*30, 45, s*28, 62);
+    ctx.stroke();
+    // Frill membrane
+    ctx.globalAlpha = 0.075;
+    ctx.fillStyle = 'rgba(130,175,255,0.5)';
+    ctx.beginPath();
+    ctx.moveTo(s*15, 16);
+    ctx.bezierCurveTo(s*30, 22, s*42, 35, s*46, 56);
+    ctx.lineTo(s*28, 62);
+    ctx.bezierCurveTo(s*25, 44, s*24, 30, s*14, 20);
+    ctx.closePath(); ctx.fill();
+    ctx.globalAlpha = 1;
+  });
+
+  ctx.restore();
+}
+
+// ─────────────────────────────────────────────────────────────────────
+//  NECK / DORSAL SPINE DETAIL
+// ─────────────────────────────────────────────────────────────────────
+function drawVertebra(x, y, angle, size, alpha) {
+  ctx.save();
+  ctx.translate(x, y); ctx.rotate(angle + Math.PI/2);
+  ctx.globalAlpha = alpha;
+  ctx.strokeStyle = '#b8d0ff'; ctx.lineWidth = 1.3; ctx.lineCap = 'round';
+  ctx.shadowColor = 'rgba(180,215,255,0.45)'; ctx.shadowBlur = 4;
+  // Neural spine (tall, dorsal process)
+  ctx.beginPath(); ctx.moveTo(0, -size*0.3); ctx.lineTo(0, -size); ctx.stroke();
+  // Transverse processes
+  [-1,1].forEach(s => {
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(s*size*0.8, -size*0.15); ctx.stroke();
+    ctx.beginPath(); ctx.arc(s*size*0.8, -size*0.15, 2, 0, Math.PI*2);
+    ctx.fillStyle = 'rgba(180,215,255,0.2)'; ctx.fill(); ctx.stroke();
+  });
+  ctx.restore();
+}
+
+// ─────────────────────────────────────────────────────────────────────
+//  RIBS — realistic curved shape with head + tubercle
+// ─────────────────────────────────────────────────────────────────────
+function drawRib(cx, cy, angle, len, side, alpha) {
+  ctx.save();
+  ctx.translate(cx, cy); ctx.rotate(angle);
+  ctx.globalAlpha = alpha;
+  ctx.strokeStyle = '#bed4ff'; ctx.lineWidth = 2; ctx.lineCap = 'round';
+  ctx.shadowColor = 'rgba(180,215,255,0.55)'; ctx.shadowBlur = 5;
+
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.bezierCurveTo(
+    side*len*0.35, -len*0.18,
+    side*len*0.78, len*0.22,
+    side*len*0.88, len*0.65
+  );
+  ctx.bezierCurveTo(
+    side*len*0.9, len*0.88,
+    side*len*0.65, len*1.05,
+    side*len*0.38, len*1.08
+  );
+  ctx.stroke();
+
+  // Rib tip
+  ctx.lineWidth = 1;
+  ctx.fillStyle = 'rgba(190,215,255,0.18)';
+  ctx.beginPath(); ctx.arc(side*len*0.38, len*1.08, 2.8, 0, Math.PI*2);
+  ctx.fill(); ctx.stroke();
+  ctx.restore();
+}
+
+// ─────────────────────────────────────────────────────────────────────
+//  WING — full anatomical bat-like structure with dynamic banking + flap
+//
+//  Banking:  when dragon turns right (+bankAngle), left wing rises, right sinks
+//  Folding:  wing fingers close on upstroke
+//  Sweep:    humerus angle sweeps forward/back during flap cycle
+// ─────────────────────────────────────────────────────────────────────
+function drawWing(ax, ay, bodyAngle, side, flapVal, bank, spd) {
+  // flapVal = sin(flapPhase) * amplitude, -1..1 approximately
+  const fold = Math.max(0, -flapVal) * 0.62;  // fold on upstroke
+
+  // Banking Y offset: -side * bank gives correct direction
+  const bk = -side * bank;  // left wing: bk = -bank; positive bank → left wing up
+
+  // Horizontal base angle: perpendicular to body direction
+  const perpA = bodyAngle - side * Math.PI / 2;
+  // Slight forward sweep during downstroke
+  const sweepOff = flapVal * 0.22;
+  const humA = perpA + sweepOff;
+
+  // Scapula (shoulder girdle stub)
+  const SL = 14;
+  const SX = ax + Math.cos(perpA) * SL;
+  const SY = ay + Math.sin(perpA) * SL + bk * 6;
+
+  // Humerus (upper arm)
+  const HL = 70 + spd * 0.04;
+  const HX = SX + Math.cos(humA) * HL;
+  const HY = SY + Math.sin(humA) * HL + flapVal * 12 + bk * 22;
+
+  // Elbow — slight bend, more on upstroke
+  const elbow = 0.14 + fold * 0.58;
+  const FA = humA + elbow;
+  const FL = 56 - fold * 10;
+  const FX = HX + Math.cos(FA) * FL;
+  const FY = HY + Math.sin(FA) * FL + flapVal * 5 + bk * 9;
+
+  // Wrist
+  const WA = FA + 0.08;
+  const WL = 20 - fold * 4;
+  const WX = FX + Math.cos(WA) * WL;
+  const WY = FY + Math.sin(WA) * WL + bk * 3;
+
+  // ── Draw membranes FIRST (behind bones) ──
+  const spr = 1 - fold * 0.42;
+  const dOff = [-0.82, -0.24, 0.38, 1.02].map(o => o * spr);
+  const dLen = [110, 140, 128, 96].map(l => l * (1 - fold * 0.22));
+  const ftips = dOff.map((o, i) => ({
+    x: WX + Math.cos(humA + o) * dLen[i],
+    y: WY + Math.sin(humA + o) * dLen[i] + flapVal * 9 + bk * 28
+  }));
+
+  ctx.save();
+  // Propatagium (leading edge — shoulder to wrist)
+  ctx.globalAlpha = 0.07;
+  ctx.fillStyle = 'rgba(90,135,215,0.5)';
+  ctx.beginPath();
+  ctx.moveTo(ax, ay); ctx.lineTo(SX,SY); ctx.lineTo(HX,HY);
+  ctx.lineTo(FX,FY); ctx.lineTo(WX,WY); ctx.lineTo(ftips[0].x, ftips[0].y);
+  ctx.closePath(); ctx.fill();
+
+  // Main membrane (fingers to body)
+  ctx.globalAlpha = 0.095;
+  ctx.fillStyle = 'rgba(85,130,210,0.45)';
+  ctx.beginPath();
+  ctx.moveTo(ax, ay); ctx.lineTo(WX,WY);
+  ftips.forEach(f => ctx.lineTo(f.x, f.y));
+  ctx.closePath(); ctx.fill();
+
+  // Patagial vein highlights
+  ctx.globalAlpha = 0.14;
+  ctx.strokeStyle = 'rgba(150,190,255,0.38)';
+  ctx.lineWidth = 0.85; ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(SX,SY); ctx.lineTo(HX,HY); ctx.lineTo(FX,FY);
+  ctx.lineTo(WX,WY);
+  ftips.forEach(f => ctx.lineTo(f.x,f.y));
+  ctx.lineTo(ax, ay);
+  ctx.closePath(); ctx.stroke();
+  ctx.restore();
+
+  // ── Now draw bones ──
+  // Scapula
+  drawBone(ax,ay, SX,SY, 3.5, 0.88);
+  drawJoint(SX,SY, 5.5, 0.9);
+  // Humerus
+  drawBone(SX,SY, HX,HY, 3.9, 0.9);
+  drawJoint(HX,HY, 7.2, 0.92);
+  // Forearm
+  drawBone(HX,HY, FX,FY, 3.2, 0.9);
+  drawJoint(FX,FY, 5.5, 0.9);
+  // Wrist
+  drawBone(FX,FY, WX,WY, 2.8, 0.9);
+  drawJoint(WX,WY, 5, 0.9);
+
+  // Elbow brace strut
+  const bsX = (SX+HX)*0.5, bsY = (SY+HY)*0.5;
+  drawBone(SX,SY, FX,FY, 1.5, 0.45);
+
+  // Thumb claw (digit I)
+  const tA = humA - 1.15;
+  const tX = WX + Math.cos(tA)*28, tY = WY + Math.sin(tA)*28 + bk*2;
+  drawBone(WX,WY, tX,tY, 2.2, 0.84);
+  drawJoint(tX,tY, 3.8, 0.78);
+  drawBone(tX,tY, tX+Math.cos(tA-0.5)*12, tY+Math.sin(tA-0.5)*12, 1.4, 0.68);
+
+  // Digits II–V
+  const dWidths = [2.8, 2.75, 2.4, 2.1];
+  ftips.forEach((ft, i) => {
+    drawBone(WX,WY, ft.x,ft.y, dWidths[i], 0.88);
+    // Mid-phalange joint
+    const mx = WX+(ft.x-WX)*0.48, my = WY+(ft.y-WY)*0.48;
+    drawJoint(mx,my, 2.6, 0.58);
+    drawJoint(ft.x,ft.y, 3.2-i*0.28, 0.82);
+    // Wing tip claw
+    const cA = Math.atan2(ft.y-WY, ft.x-WX) + 0.28;
+    drawBone(ft.x,ft.y, ft.x+Math.cos(cA)*9, ft.y+Math.sin(cA)*9, 1.2, 0.65);
+  });
+
+  // Shoulder attachment joint (on top of everything)
+  drawJoint(ax,ay, 6.5, 0.85);
+}
+
+// ─────────────────────────────────────────────────────────────────────
+//  HIND LEG — femur → tibia → metatarsus → 3 talons
+// ─────────────────────────────────────────────────────────────────────
+function drawHindLeg(x, y, bodyAngle, side, alpha) {
+  const sway = Math.sin(flapPhase * 0.7 + side * Math.PI) * 6;
+  ctx.save(); ctx.translate(x,y); ctx.rotate(bodyAngle + Math.PI/2);
+  ctx.globalAlpha = alpha;
+
+  drawJoint(0,0, 5.5, alpha);
+
+  // Femur — hangs backward-downward when flying
+  const fA = side*0.52 + 1.25 + sway*0.012;
+  const fL = 40;
+  const fx = Math.cos(fA)*fL, fy = Math.sin(fA)*fL;
+  drawBone(0,0, fx,fy, 3, alpha);
+  drawJoint(fx,fy, 4.8, alpha*0.9);
+
+  // Tibia
+  const tA = fA + 0.85 + side*0.18;
+  const tL = 34;
+  const tx = fx+Math.cos(tA)*tL, ty = fy+Math.sin(tA)*tL;
+  drawBone(fx,fy, tx,ty, 2.4, alpha);
+  drawJoint(tx,ty, 3.8, alpha*0.85);
+
+  // Metatarsus
+  const mA = tA + side*0.28 - 0.5;
+  const mL = 24;
+  const mx = tx+Math.cos(mA)*mL, my = ty+Math.sin(mA)*mL;
+  drawBone(tx,ty, mx,my, 2, alpha*0.9);
+  drawJoint(mx,my, 3.2, alpha*0.8);
+
+  // 3 talons
+  [-0.45, 0.05, 0.55].forEach(dA => {
+    const cA = mA + dA, cL = 19-Math.abs(dA)*8;
+    drawBone(mx,my, mx+Math.cos(cA)*cL, my+Math.sin(cA)*cL, 1.5, alpha*0.75);
+  });
+  ctx.restore();
+}
+
+// ─────────────────────────────────────────────────────────────────────
+//  FRONT LEG — folded against body during flight
+// ─────────────────────────────────────────────────────────────────────
+function drawFrontLeg(x, y, bodyAngle, side, alpha) {
+  ctx.save(); ctx.translate(x,y); ctx.rotate(bodyAngle + Math.PI/2);
+  ctx.globalAlpha = alpha;
+
+  drawJoint(0,0, 4.5, alpha);
+
+  const fA = side*0.65 + 0.5;
+  const fL = 28;
+  const fx = Math.cos(fA)*fL, fy = Math.sin(fA)*fL;
+  drawBone(0,0, fx,fy, 2.5, alpha);
+  drawJoint(fx,fy, 3.8, alpha*0.9);
+
+  const tA = fA + side*0.85 + 0.6;
+  const tL = 24;
+  const tx = fx+Math.cos(tA)*tL, ty = fy+Math.sin(tA)*tL;
+  drawBone(fx,fy, tx,ty, 2, alpha);
+  drawJoint(tx,ty, 3.2, alpha*0.85);
+
+  [-0.32, 0.15, 0.6].forEach(dA => {
+    drawBone(tx,ty, tx+Math.cos(tA+dA)*15, ty+Math.sin(tA+dA)*15, 1.4, alpha*0.75);
+  });
+  ctx.restore();
+}
+
+// ─────────────────────────────────────────────────────────────────────
+//  TAIL SPIKES — bilateral, tapers toward tip
+// ─────────────────────────────────────────────────────────────────────
+function drawTailSpike(x, y, angle, size, alpha) {
+  if (size < 2) return;
+  ctx.save(); ctx.translate(x,y); ctx.rotate(angle + Math.PI/2);
+  ctx.globalAlpha = alpha;
+  ctx.strokeStyle = '#b4ccf8'; ctx.lineWidth = 1.4; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  ctx.shadowColor = 'rgba(180,215,255,0.5)'; ctx.shadowBlur = 4;
+  [-1,1].forEach(s => {
+    ctx.beginPath();
+    ctx.moveTo(0,0);
+    ctx.lineTo(s*size*0.65, -size*0.32);
+    ctx.lineTo(s*size*0.18, size*0.48);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(160,200,255,0.07)';
+    ctx.fill(); ctx.stroke();
+  });
+  ctx.restore();
+}
+
+// ─────────────────────────────────────────────────────────────────────
+//  TAIL FIN — bifurcated V shape with fin rays
+// ─────────────────────────────────────────────────────────────────────
+function drawTailFin(x, y, angle, alpha) {
+  ctx.save(); ctx.translate(x,y); ctx.rotate(angle + Math.PI/2);
+  ctx.globalAlpha = alpha;
+  ctx.strokeStyle = '#b8d0ff'; ctx.lineWidth = 1.9; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  ctx.shadowColor = 'rgba(185,215,255,0.75)'; ctx.shadowBlur = 9;
+
+  drawBone(0,0, 0,16, 3, alpha);
+  drawJoint(0,16, 5, alpha);
+
+  [-1,1].forEach(s => {
+    const sX=s*9, sY=10;
+    const eX=s*28, eY=-2;
+    const wX=s*50, wY=-18;
+    drawBone(0,16, sX,sY, 2.8, alpha);  drawJoint(sX,sY, 4, alpha*0.9);
+    drawBone(sX,sY, eX,eY, 2.5, alpha); drawJoint(eX,eY, 3.8, alpha*0.9);
+    drawBone(eX,eY, wX,wY, 2.2, alpha); drawJoint(wX,wY, 3.2, alpha*0.85);
+    drawBone(0,16, eX,eY, 1.4, alpha*0.5); // brace
+
+    const rayBase = Math.atan2(wY-eY, wX-eX);
+    const rays = [
+      {a: rayBase+s*0.25, l:52},{a: rayBase+s*0.75, l:68},{a: rayBase+s*1.28, l:56}
+    ];
+    const rayTips = rays.map(r => ({x: wX+Math.cos(r.a)*r.l, y: wY+Math.sin(r.a)*r.l}));
+    rays.forEach((r,i) => {
+      drawBone(wX,wY, rayTips[i].x,rayTips[i].y, 2-i*0.32, alpha*0.85);
+      drawJoint(rayTips[i].x,rayTips[i].y, 2.8-i*0.3, alpha*0.78);
+    });
+
+    ctx.globalAlpha = alpha*0.1;
+    ctx.fillStyle = 'rgba(120,165,230,0.5)';
+    ctx.beginPath();
+    ctx.moveTo(0,16); ctx.lineTo(sX,sY); ctx.lineTo(eX,eY); ctx.lineTo(wX,wY);
+    rayTips.forEach(rt => ctx.lineTo(rt.x,rt.y));
+    ctx.closePath(); ctx.fill();
+    ctx.globalAlpha = alpha*0.16;
+    ctx.strokeStyle = 'rgba(160,195,255,0.32)';
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    ctx.moveTo(0,16); ctx.lineTo(sX,sY); ctx.lineTo(eX,eY); ctx.lineTo(wX,wY);
+    rayTips.forEach(rt => ctx.lineTo(rt.x,rt.y));
+    ctx.stroke();
+    ctx.strokeStyle = '#b8d0ff'; ctx.lineWidth = 1.9;
+  });
+
+  ctx.restore();
+}
+
+// ─────────────────────────────────────────────────────────────────────
+//  FLAMES
+// ─────────────────────────────────────────────────────────────────────
+function spawnFlame(hx, hy, ang) {
+  for (let i=0; i<10; i++) {
+    const sp = (Math.random()-0.5)*0.72, spd = Math.random()*10+5;
+    flames.push({
+      x: hx+Math.cos(ang)*42, y: hy+Math.sin(ang)*42,
+      vx: Math.cos(ang+sp)*spd, vy: Math.sin(ang+sp)*spd,
+      life:1, decay: Math.random()*0.02+0.01,
+      size: Math.random()*26+14, type: Math.random()<0.55?'fire':'ember'
+    });
+  }
+}
+
+function updateFlames() {
+  for (let i=flames.length-1; i>=0; i--) {
+    const f=flames[i]; f.x+=f.vx; f.y+=f.vy;
+    f.vy+=0.045; f.vx*=0.975;
+    f.life-=f.decay; f.size*=0.972;
+    if (f.life<=0) flames.splice(i,1);
+  }
+}
+
+function drawFlames() {
+  flames.forEach(f => {
+    const g = ctx.createRadialGradient(f.x,f.y,0,f.x,f.y,f.size);
+    if (f.type==='fire') {
+      g.addColorStop(0,`rgba(255,255,180,${f.life})`);
+      g.addColorStop(0.28,`rgba(255,170,0,${f.life*0.9})`);
+      g.addColorStop(0.65,`rgba(255,55,0,${f.life*0.55})`);
+      g.addColorStop(1,'rgba(80,0,0,0)');
+    } else {
+      g.addColorStop(0,`rgba(255,220,50,${f.life})`);
+      g.addColorStop(0.5,`rgba(255,90,0,${f.life*0.55})`);
+      g.addColorStop(1,'rgba(100,0,0,0)');
+    }
+    ctx.save(); ctx.fillStyle=g;
+    ctx.beginPath(); ctx.arc(f.x,f.y,f.size,0,Math.PI*2); ctx.fill();
+    ctx.restore();
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────
+//  UPDATE
+// ─────────────────────────────────────────────────────────────────────
+function angleDiff(a,b) {
+  let d=a-b;
+  while(d>Math.PI)d-=Math.PI*2;
+  while(d<-Math.PI)d+=Math.PI*2;
+  return d;
+}
+function lerp(a,b,t){return a+(b-a)*t;}
+function clamp(v,mn,mx){return Math.max(mn,Math.min(mx,v));}
+
+function update() {
+  // Move head toward cursor
+  spine[0].x += (mouse.x - spine[0].x)*0.13;
+  spine[0].y += (mouse.y - spine[0].y)*0.13;
+
+  // Velocity tracking
+  velX = spine[0].x - prevX;
+  velY = spine[0].y - prevY;
+  speed = Math.sqrt(velX*velX + velY*velY);
+  prevX = spine[0].x; prevY = spine[0].y;
+
+  // Heading + turn rate
+  if (speed > 0.25) {
+    const newH = Math.atan2(velY, velX);
+    const diff = angleDiff(newH, heading);
+    heading += diff * 0.14;
+
+    const turnRate = angleDiff(newH, prevHeading) * 60;
+    smoothTurnRate = lerp(smoothTurnRate, turnRate, 0.06);
+    prevHeading = newH;
+  } else {
+    smoothTurnRate = lerp(smoothTurnRate, 0, 0.05);
+  }
+
+  // Bank angle (smoothed turn rate → tilt)
+  const targetBank = clamp(smoothTurnRate * 0.48, -Math.PI/3, Math.PI/3);
+  bankAngle = lerp(bankAngle, targetBank, 0.055);
+
+  // Flap (speed-dependent frequency)
+  flapPhase += (1.5 + speed * 0.09) * 0.04;
+
+  // Chain spine segments
+  for (let i=1; i<NUM_SEG; i++) {
+    const dx = spine[i].x-spine[i-1].x;
+    const dy = spine[i].y-spine[i-1].y;
+    const d = Math.sqrt(dx*dx+dy*dy);
+    if (d > SEG_DIST) {
+      spine[i].x = spine[i-1].x + dx/d*SEG_DIST;
+      spine[i].y = spine[i-1].y + dy/d*SEG_DIST;
+    }
+  }
+
+  // Flames
+  if (flameActive) {
+    flameDuration -= 16;
+    if (flameDuration <= 0) flameActive = false;
+    if (NUM_SEG > 1) {
+      const h=spine[0], n=spine[1];
+      spawnFlame(h.x, h.y, Math.atan2(h.y-n.y, h.x-n.x));
+    }
+  }
+  updateFlames();
+  time += 0.04;
+}
+
+// ─────────────────────────────────────────────────────────────────────
+//  DRAW
+// ─────────────────────────────────────────────────────────────────────
+function draw() {
+  ctx.clearRect(0,0,W,H);
+
+  // Dust particles
+  dust.forEach(p => {
+    p.y += p.vy;
+    if (p.y < 0) { p.y = H; p.x = Math.random()*W; }
+    ctx.save(); ctx.globalAlpha=p.o; ctx.fillStyle='#8baedd';
+    ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2); ctx.fill(); ctx.restore();
+  });
+
+  drawFlames();
+
+  // ── Wings (drawn before body so body overlaps root) ──
+  if (NUM_SEG > 5) {
+    const ws=spine[5], wp=spine[4];
+    const bDir = Math.atan2(ws.y-wp.y, ws.x-wp.x);
+    const flapAmp = 0.58 + speed*0.014;
+    const fv = Math.sin(flapPhase) * flapAmp;
+    drawWing(ws.x,ws.y, bDir, 1,  fv, bankAngle, speed); // left
+    drawWing(ws.x,ws.y, bDir, -1, fv, bankAngle, speed); // right
+  }
+
+  // ── Hind legs ──
+  if (NUM_SEG > 15) {
+    const s=spine[14], p=spine[13];
+    const ang = Math.atan2(s.y-p.y, s.x-p.x);
+    drawHindLeg(s.x,s.y, ang, 1, 0.78);
+    drawHindLeg(s.x,s.y, ang,-1, 0.78);
+  }
+
+  // ── Tail spikes (seg 16 to end-1) ──
+  for (let i=16; i<NUM_SEG-1; i++) {
+    const s=spine[i], p=spine[i-1];
+    const ang = Math.atan2(s.y-p.y, s.x-p.x);
+    const prog = (i-16)/(NUM_SEG-16);
+    drawTailSpike(s.x,s.y, ang, 18*(1-prog)+4, 0.75-prog*0.22);
+  }
+
+  // ── Tail fin ──
+  if (NUM_SEG > 2) {
+    const tl=spine[NUM_SEG-1], tp=spine[NUM_SEG-2];
+    drawTailFin(tl.x,tl.y, Math.atan2(tl.y-tp.y, tl.x-tp.x), 0.88);
+  }
+
+  // ── Main spine column ──
+  for (let i=1; i<NUM_SEG; i++) {
+    const a = Math.max(0.25, 0.9 - i/NUM_SEG*0.55);
+    const w = Math.max(1.4, 5.8 - i*0.17);
+    drawBone(spine[i-1].x,spine[i-1].y, spine[i].x,spine[i].y, w, a);
+  }
+
+  // ── Vertebra joints + processes ──
+  for (let i=0; i<NUM_SEG; i++) {
+    drawJoint(spine[i].x,spine[i].y, Math.max(2.2, 6.2-i*0.18), Math.max(0.28, 0.9-i/NUM_SEG*0.48));
+    if (i>=1 && i<NUM_SEG-1) {
+      const s=spine[i], p=spine[i-1];
+      const ang = Math.atan2(s.y-p.y, s.x-p.x);
+      if (i%2===0) drawVertebra(s.x,s.y, ang, 7.5-i*0.12, Math.max(0.18, 0.65-i/NUM_SEG*0.35));
+    }
+  }
+
+  // ── Ribcage (seg 5–13) ──
+  for (let i=5; i<=13 && i<NUM_SEG; i++) {
+    const s=spine[i], p=spine[i-1];
+    const ang = Math.atan2(s.y-p.y, s.x-p.x) + Math.PI/2;
+    const prog = (i-5)/8;
+    const ribLen = 72*Math.sin(prog*Math.PI) + 26;
+    const alpha = 0.88 - prog*0.18;
+    drawRib(s.x,s.y, ang, ribLen, 1, alpha);
+    drawRib(s.x,s.y, ang, ribLen,-1, alpha);
+  }
+
+  // Sternum (connects rib tips)
+  if (NUM_SEG > 13) {
+    ctx.save(); ctx.globalAlpha = 0.28;
+    ctx.strokeStyle = '#a8c4ee'; ctx.lineWidth = 1.2; ctx.lineCap = 'round';
+    ctx.shadowColor = 'rgba(165,205,255,0.4)'; ctx.shadowBlur = 4;
+    ctx.beginPath();
+    for (let i=5; i<=13 && i<NUM_SEG; i++) {
+      const s=spine[i], p=spine[i-1];
+      const ang = Math.atan2(s.y-p.y, s.x-p.x) + Math.PI/2;
+      const prog = (i-5)/8;
+      const ribLen = 72*Math.sin(prog*Math.PI) + 26;
+      const tipX = s.x + Math.cos(ang)*ribLen*0.38;
+      const tipY = s.y + Math.sin(ang)*ribLen*1.08;
+      if (i===5) ctx.moveTo(tipX,tipY); else ctx.lineTo(tipX,tipY);
+    }
+    ctx.stroke(); ctx.restore();
+  }
+
+  // ── Front legs ──
+  if (NUM_SEG > 8) {
+    const s=spine[7], p=spine[6];
+    const ang = Math.atan2(s.y-p.y, s.x-p.x);
+    drawFrontLeg(s.x,s.y, ang, 1, 0.78);
+    drawFrontLeg(s.x,s.y, ang,-1, 0.78);
+  }
+
+  // ── Skull ──
+  if (NUM_SEG > 1) {
+    const h=spine[0], n=spine[1];
+    drawSkull(h.x,h.y, Math.atan2(h.y-n.y, h.x-n.x));
+  }
+
+  // ── HUD ──
+  if (flameActive) {
+    ctx.save();
+    ctx.shadowColor='#ff6600'; ctx.shadowBlur=22;
+    ctx.fillStyle='rgba(255,130,25,0.92)';
+
+    ctx.restore();
+  } else {
+    const pct = Math.min(1,(Date.now()-lastFlameTime)/FLAME_CD);
+    ctx.save();
+    ctx.globalAlpha=0.35; ctx.fillStyle='#0d0d1a';
+    ctx.fillRect(16,H-32,160,11);
+    ctx.globalAlpha=0.85;
+    ctx.fillRect(16,H-32,160*pct,11);
+    ctx.globalAlpha=0.7;
+
+
+    ctx.restore();
+  }
+
+  // Cursor dot
+  ctx.save(); ctx.globalAlpha=0.5;
+  ctx.fillStyle='#ff4400'; ctx.shadowColor='#ff4400'; ctx.shadowBlur=12;
+  ctx.beginPath(); ctx.arc(mouse.x,mouse.y,3,0,Math.PI*2); ctx.fill();
+  ctx.restore();
+}
+
+function loop() { update(); draw(); requestAnimationFrame(loop); }
+loop();
+</script>
+</body>
+</html>
