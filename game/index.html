@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Skeleton Dragon</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0a0f;
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+    cursor: none;
+    font-family: serif;
+  }
+  canvas { display: block; }
+  #title {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: rgba(180, 200, 255, 0.3);
+    font-size: 13px;
+    letter-spacing: 6px;
+    text-transform: uppercase;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<div id="title"></div>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+window.addEventListener('resize', () => {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+});
+
+let mouse = { x: canvas.width / 2, y: canvas.height / 2 };
+window.addEventListener('mousemove', e => { mouse.x = e.clientX; mouse.y = e.clientY; });
+
+// Particle system for atmosphere
+const particles = Array.from({length: 60}, () => ({
+  x: Math.random() * canvas.width,
+  y: Math.random() * canvas.height,
+  r: Math.random() * 1.5 + 0.3,
+  speed: Math.random() * 0.3 + 0.1,
+  opacity: Math.random() * 0.5 + 0.1
+}));
+
+// Dragon segments (spine)
+const SEGMENTS = 28;
+const segments = [];
+for (let i = 0; i < SEGMENTS; i++) {
+  segments.push({ x: canvas.width / 2, y: canvas.height / 2 });
+}
+
+// Segment spacing
+const SEG_LEN = [16, 15, 14, 14, 13, 13, 12, 12, 12, 11, 11, 11, 10, 10, 10, 10, 9, 9, 9, 8, 8, 7, 7, 6, 6, 5, 5, 4];
+
+let time = 0;
+
+function lerp(a, b, t) { return a + (b - a) * t; }
+function dist(a, b) { return Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2); }
+
+function drawBone(x1, y1, x2, y2, w, alpha) {
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.strokeStyle = `rgba(190, 210, 255, ${alpha})`;
+  ctx.shadowColor = 'rgba(140, 180, 255, 0.8)';
+  ctx.shadowBlur = 6;
+  ctx.lineWidth = w;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(x2, y2);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawCircle(x, y, r, alpha, glow = false) {
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  if (glow) {
+    ctx.shadowColor = 'rgba(140, 180, 255, 1)';
+    ctx.shadowBlur = 12;
+  }
+  ctx.strokeStyle = `rgba(190, 215, 255, ${alpha})`;
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawSkull(x, y, angle, scale) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(angle);
+  ctx.scale(scale, scale);
+
+  const g = ctx.globalAlpha;
+  ctx.globalAlpha = 0.95;
+  ctx.shadowColor = 'rgba(140, 180, 255, 0.9)';
+  ctx.shadowBlur = 18;
+  ctx.strokeStyle = 'rgba(200, 220, 255, 0.95)';
+  ctx.lineWidth = 1.5;
+
+  // Cranium
+  ctx.beginPath();
+  ctx.arc(0, -2, 18, Math.PI, 0, false);
+  ctx.lineTo(14, 8);
+  ctx.lineTo(10, 14);
+  ctx.lineTo(-10, 14);
+  ctx.lineTo(-14, 8);
+  ctx.closePath();
+  ctx.stroke();
+
+  // Eye sockets
+  ctx.fillStyle = 'rgba(80, 120, 200, 0.6)';
+  ctx.beginPath(); ctx.arc(-7, 2, 5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.arc(7, 2, 5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+
+  // Eye glow
+  ctx.fillStyle = 'rgba(150, 200, 255, 0.9)';
+  ctx.shadowBlur = 20;
+  ctx.shadowColor = 'cyan';
+  ctx.beginPath(); ctx.arc(-7, 2, 2.5, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(7, 2, 2.5, 0, Math.PI * 2); ctx.fill();
+
+  // Snout
+  ctx.shadowBlur = 6;
+  ctx.strokeStyle = 'rgba(200, 220, 255, 0.9)';
+  ctx.lineWidth = 1.3;
+  ctx.beginPath();
+  ctx.moveTo(-10, 14);
+  ctx.lineTo(-14, 22);
+  ctx.lineTo(-10, 26);
+  ctx.lineTo(10, 26);
+  ctx.lineTo(14, 22);
+  ctx.lineTo(10, 14);
+  ctx.stroke();
+
+  // Teeth (upper)
+  for (let t = -3; t <= 3; t += 2) {
+    ctx.beginPath();
+    ctx.moveTo(t * 2.5, 14);
+    ctx.lineTo(t * 2.5 - 1, 20);
+    ctx.lineTo(t * 2.5 + 1, 20);
+    ctx.closePath();
+    ctx.stroke();
+  }
+
+  // Nostrils
+  ctx.beginPath(); ctx.arc(-4, 21, 1.5, 0, Math.PI * 2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(4, 21, 1.5, 0, Math.PI * 2); ctx.stroke();
+
+  // Horns
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(-10, -16);
+  ctx.quadraticCurveTo(-22, -32, -14, -44);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(10, -16);
+  ctx.quadraticCurveTo(22, -32, 14, -44);
+  ctx.stroke();
+
+  // Bone joints on skull
+  drawCircle(-10, -16, 3, 0.7);
+  drawCircle(10, -16, 3, 0.7);
+
+  ctx.restore();
+}
+
+function drawSpineJoint(x, y, r, alpha) {
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.shadowColor = 'rgba(140, 180, 255, 0.7)';
+  ctx.shadowBlur = 8;
+  ctx.strokeStyle = `rgba(200, 220, 255, ${alpha})`;
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(x, y, r * 0.5, 0, Math.PI * 2); ctx.stroke();
+  ctx.restore();
+}
+
+function drawRib(x, y, angle, size, side, alpha) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(angle);
+  ctx.globalAlpha = alpha;
+  ctx.shadowColor = 'rgba(140, 180, 255, 0.6)';
+  ctx.shadowBlur = 5;
+  ctx.strokeStyle = `rgba(190, 215, 255, ${alpha})`;
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.bezierCurveTo(side * size * 0.8, -size * 0.4, side * size * 1.2, size * 0.8, side * size * 0.3, size * 1.1);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawWing(sx, sy, angle, size, side, alpha, t) {
+  ctx.save();
+  ctx.translate(sx, sy);
+  ctx.rotate(angle + side * 0.1);
+  ctx.globalAlpha = alpha * 0.85;
+  ctx.shadowColor = 'rgba(100, 160, 255, 0.8)';
+  ctx.shadowBlur = 10;
+  ctx.strokeStyle = `rgba(180, 210, 255, ${alpha})`;
+  ctx.lineWidth = 1.5;
+
+  const flap = Math.sin(t * 2) * 15 * side;
+
+  // Wing arm bones
+  const wx = side * (size + flap);
+  const wy = -size * 0.5 + Math.sin(t * 2) * 8;
+
+  // Main wing bone
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(wx, wy);
+  ctx.stroke();
+
+  // Wing fingers
+  for (let f = 0; f < 3; f++) {
+    const ft = f / 2;
+    const fx = wx + side * size * (0.4 + ft * 0.5) * Math.cos(ft * 0.6 - 0.3);
+    const fy = wy + size * (0.3 + ft * 0.5) * Math.sin(ft * 0.5 + 0.5);
+    ctx.beginPath();
+    ctx.moveTo(wx, wy);
+    ctx.lineTo(fx, fy);
+    ctx.stroke();
+    drawCircle(wx, wy, 3, alpha * 0.7);
+    drawCircle(fx, fy, 2, alpha * 0.5);
+  }
+
+  // Wing membrane (transparent)
+  ctx.globalAlpha = alpha * 0.12;
+  ctx.fillStyle = 'rgba(140, 180, 255, 0.3)';
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(wx, wy);
+  ctx.lineTo(wx + side * size * 0.9, wy + size * 0.8);
+  ctx.closePath();
+  ctx.fill();
+
+  drawCircle(wx, wy, 4, alpha * 0.8);
+  ctx.restore();
+}
+
+function drawTailSpike(x, y, angle, size, alpha) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(angle);
+  ctx.globalAlpha = alpha;
+  ctx.strokeStyle = `rgba(190, 215, 255, ${alpha})`;
+  ctx.lineWidth = 1;
+  ctx.shadowColor = 'rgba(140, 180, 255, 0.5)';
+  ctx.shadowBlur = 4;
+  // spike up and down
+  for (let s of [-1, 1]) {
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(s * size * 0.6, -size * 0.8);
+    ctx.lineTo(s * size * 0.2, size * 0.3);
+    ctx.closePath();
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function update() {
+  // Head follows mouse with easing
+  segments[0].x = lerp(segments[0].x, mouse.x, 0.18);
+  segments[0].y = lerp(segments[0].y, mouse.y, 0.18);
+
+  // Chain follow
+  for (let i = 1; i < SEGMENTS; i++) {
+    const dx = segments[i].x - segments[i - 1].x;
+    const dy = segments[i].y - segments[i - 1].y;
+    const d = Math.sqrt(dx * dx + dy * dy);
+    const len = SEG_LEN[Math.min(i, SEG_LEN.length - 1)];
+    if (d > len) {
+      segments[i].x = segments[i - 1].x + dx / d * len;
+      segments[i].y = segments[i - 1].y + dy / d * len;
+    }
+  }
+}
+
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Starfield
+  particles.forEach(p => {
+    p.y -= p.speed;
+    if (p.y < 0) { p.y = canvas.height; p.x = Math.random() * canvas.width; }
+    ctx.save();
+    ctx.globalAlpha = p.opacity;
+    ctx.fillStyle = 'rgba(180, 200, 255, 0.8)';
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  });
+
+  // Ambient glow under dragon
+  const gx = ctx.createRadialGradient(segments[5].x, segments[5].y, 0, segments[5].x, segments[5].y, 120);
+  gx.addColorStop(0, 'rgba(80, 120, 200, 0.06)');
+  gx.addColorStop(1, 'transparent');
+  ctx.fillStyle = gx;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Draw spine bones between segments
+  for (let i = 1; i < SEGMENTS; i++) {
+    const alpha = 0.7 - i / SEGMENTS * 0.4;
+    const w = Math.max(1, 3 - i * 0.08);
+    drawBone(segments[i - 1].x, segments[i - 1].y, segments[i].x, segments[i].y, w, alpha);
+  }
+
+  // Draw ribs (segments 2-14)
+  for (let i = 2; i <= 14; i++) {
+    if (i >= SEGMENTS) break;
+    const seg = segments[i];
+    const prev = segments[i - 1];
+    const ang = Math.atan2(seg.y - prev.y, seg.x - prev.x) + Math.PI / 2;
+    const ribSize = 18 - i * 0.6;
+    const alpha = 0.6 - i * 0.02;
+    drawRib(seg.x, seg.y, ang, ribSize, 1, alpha);
+    drawRib(seg.x, seg.y, ang, ribSize, -1, alpha);
+  }
+
+  // Spine joints
+  for (let i = 0; i < SEGMENTS; i++) {
+    const r = Math.max(2, 5 - i * 0.15);
+    const alpha = 0.8 - i / SEGMENTS * 0.4;
+    drawSpineJoint(segments[i].x, segments[i].y, r, alpha);
+  }
+
+  // Wings on segment 4
+  if (SEGMENTS > 4) {
+    const ws = segments[4];
+    const wn = segments[3];
+    const wingAngle = Math.atan2(ws.y - wn.y, ws.x - wn.x) + Math.PI / 2;
+    drawWing(ws.x, ws.y, wingAngle, 55, 1, 0.85, time);
+    drawWing(ws.x, ws.y, wingAngle, 55, -1, 0.85, time);
+  }
+
+  // Tail spikes on last 6 segments
+  for (let i = SEGMENTS - 8; i < SEGMENTS; i++) {
+    if (i < 1) continue;
+    const seg = segments[i];
+    const prev = segments[i - 1];
+    const ang = Math.atan2(seg.y - prev.y, seg.x - prev.x);
+    const sz = (SEGMENTS - i) * 2.5;
+    const alpha = 0.5 - (SEGMENTS - i) * 0.03;
+    if (sz > 2) drawTailSpike(seg.x, seg.y, ang, sz, Math.max(0.2, alpha));
+  }
+
+  // Draw skull (head)
+  if (SEGMENTS > 1) {
+    const head = segments[0];
+    const neck = segments[1];
+    const headAngle = Math.atan2(head.y - neck.y, head.x - neck.x) + Math.PI / 2;
+    drawSkull(head.x, head.y, headAngle, 0.9);
+  }
+
+  time += 0.04;
+}
+
+function loop() {
+  update();
+  draw();
+  requestAnimationFrame(loop);
+}
+
+loop();
+</script>
+</body>
+</html>
