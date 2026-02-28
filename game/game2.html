@@ -27,10 +27,8 @@ const spine = [];
 for(let i=0;i<NUM_SEG;i++) spine.push({x: canvas.width/2, y: canvas.height/2+i*SEG_DIST});
 
 const flames = [];
-let lastFlameTime = 0;
 let flameActive = false;
 let flameDuration = 0;
-const FLAME_INTERVAL = 3000;
 const FLAME_DURATION = 1200;
 
 const dust = Array.from({length:80},()=>({
@@ -59,6 +57,13 @@ function spawnFlames(hx, hy, angle) {
     });
   }
 }
+window.addEventListener('mousedown', () => {
+  if(!flameActive) {
+    flameActive = true;
+    flameDuration = FLAME_DURATION;
+    lastFlameTime = Date.now();
+  }
+});
 
 function updateFlames() {
   for(let i=flames.length-1;i>=0;i--) {
@@ -444,22 +449,9 @@ function draw() {
     ctx.fillStyle='rgba(255,120,20,0.9)';
     ctx.fillText('🔥 FIRE BREATH', 16, canvas.height-18);
     ctx.restore();
-  } else {
-    const now=Date.now();
-    const pct = Math.min(1,(now-lastFlameTime)/FLAME_INTERVAL);
-    ctx.save();
-    ctx.globalAlpha=0.35;
-    ctx.fillStyle='#333';
-    ctx.fillRect(16,canvas.height-30,120,10);
-    ctx.fillStyle='#ff6600';
-    ctx.fillRect(16,canvas.height-30,120*pct,10);
-    ctx.globalAlpha=0.6;
-    ctx.fillStyle='#fff';
-    ctx.font='10px monospace';
-    ctx.fillText('FIRE CHARGE',18,canvas.height-33);
-    ctx.restore();
+  } 
   }
-}
+
 
 function loop(){
   update(); draw();
